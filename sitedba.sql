@@ -12,7 +12,11 @@ temporary tablespace &temp_tablespace
 quota unlimited on &&data_tablespace
 quota unlimited on &index_tablespace;
 REM Carry out grants
-grant create session, analyze any, alter any table to sitedba;
-grant select any table, alter any index to sitedba;
+grant create session, analyze any, alter any index to sitedba;
 REM additional grant for 9i 
-grant select any dictionary to sitedba; 
+grant select any dictionary to sitedba;
+REM ALTER TABLESPACE required for COALESCE in rebuild procedure
+grant alter tablespace to sitedba;
+REM grants required for package, objects, and scheduler job
+grant create procedure, create table, create sequence to sitedba;
+grant create job to sitedba;
