@@ -1298,7 +1298,7 @@ FAILED');
                      /* ONLINE KEYWORD ADDED FOR 9i+ */
 		     v_buff := 'ALTER INDEX '||each_rec.owner||'.'||
 				each_rec.name
-				||' REBUILD UNRECOVERABLE ONLINE TABLESPACE '
+				||' REBUILD NOLOGGING ONLINE TABLESPACE '
 				||each_rec.tablespace_name;
 		     v_buff := v_buff||' STORAGE (INITIAL ';
 		     IF v_concat = 'Y' THEN
@@ -1395,10 +1395,18 @@ BEGIN /* Package body initialisation */
 END index_tool;
 /
 
-EXECUTE dbms_job.isubmit(600,- 
-'sitedba.index_tool.collect;sitedba.index_tool.schedule;sitedba.index_tool.rebuild;',- 
-NEXT_DAY(TRUNC(SYSDATE), 'SAT')+9/24 /* 9AM on Saturday */, -
-'NEXT_DAY(TRUNC(SYSDATE), ''SAT'')+9/24' /* Every Saturday */)
+BEGIN
+  DBMS_SCHEDULER.CREATE_JOB(
+    job_name        => 'SITEDBA.INDEX_TOOL_JOB',
+    job_type        => 'PLSQL_BLOCK',
+    job_action      => 'BEGIN sitedba.index_tool.collect; sitedba.index_tool.schedule; sitedba.index_tool.rebuild; END;',
+    repeat_interval => 'FREQ=WEEKLY;BYDAY=SAT;BYHOUR=9;BYMINUTE=0;BYSECOND=0',
+    start_date      => NEXT_DAY(TRUNC(SYSDATE), 'SAT') + 9/24,
+    enabled         => TRUE,
+    comments        => 'Weekly index maintenance: collect, schedule, rebuild'
+  );
+END;
+/
 
 REM ****** Undefine variables set in the script *****
 UNDEFINE  data_tablespace
