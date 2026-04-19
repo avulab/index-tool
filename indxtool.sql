@@ -74,9 +74,11 @@ REM  4.  Hardcoded variables (e.g. six months)
 REM 	 to be softcoded from a control table
 REM  5.  Logic like (e.g. schedule procedure) to be softcoded in a control table
 REM
-REM 
-REM OS Authentication should bet setup
-connect / as sysdba
+REM
+REM NOTE: Connect as SYSDBA before running this script, e.g.:
+REM   sqlplus / as sysdba
+REM   @indxtool.sql
+REM
 
 REM  Alter current schema to procedure owner for creation of objects
 ALTER SESSION SET current_schema=sitedba
@@ -84,100 +86,166 @@ ALTER SESSION SET current_schema=sitedba
 
 REM Create Objects in the procedure owner
 
-create sequence index_tool_seq
+BEGIN
+    EXECUTE IMMEDIATE 'CREATE SEQUENCE index_tool_seq';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
 PROMPT List of tablespaces with enough free space
 SELECT DISTINCT tablespace_name
   FROM user_free_space
 WHERE bytes >= 65536 /* 64KB */
 /
-create table site_index_stats
-tablespace &&data_tablespace
-storage(initial 64K next 64K pctincrease 0)
-PCTFREE 40 /* To allow updates from index_stats */
-as select index_tool_seq.nextval record_id,
-		user owner,
-		sysdate timestamp,
-		'1234567890'status,
-		9 runcount,
-		'12345678901234567890123456789012345678901234567890123456789012345678901234567890' message, /* VARCHAR2(80) */
-		a.*
-     from index_stats a
-    where rownum < 1
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLE site_index_stats
+        TABLESPACE &&data_tablespace
+        PCTFREE 40 /* To allow updates from index_stats */
+        AS SELECT index_tool_seq.nextval record_id,
+                USER owner,
+                SYSDATE timestamp,
+                ''1234567890'' status,
+                9 runcount,
+                ''12345678901234567890123456789012345678901234567890123456789012345678901234567890'' message, /* VARCHAR2(80) */
+                a.*
+          FROM index_stats a
+         WHERE rownum < 1';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
-alter table site_index_stats
-	add constraint site_index_stats_pk
-		primary key (record_id)
-		using index tablespace &&index_tablespace
-			storage(initial 16K next 16K pctincrease 0)
-/
-
-create table site_index_moves (source_tablespace VARCHAR2(30),
-			       destination_tablespace VARCHAR2(30))
-tablespace &&data_tablespace
-storage(initial 64K next 64K pctincrease 0)
-PCTFREE 5 /* There should not be any big updates */
-/
-alter table site_index_moves
-	add constraint site_index_moves_pk
-		primary key (source_tablespace, destination_tablespace)
-		using index tablespace &&index_tablespace
-			storage(initial 16K next 16K pctincrease 0)
+BEGIN
+    EXECUTE IMMEDIATE '
+        ALTER TABLE site_index_stats
+            ADD CONSTRAINT site_index_stats_pk
+                PRIMARY KEY (record_id)
+                USING INDEX TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
 
-CREATE INDEX site_index_stats_n1 ON site_index_stats(owner, name)
-TABLESPACE &&index_tablespace
-STORAGE (INITIAL 16K NEXT 16K PCTINCREASE 0)
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLE site_index_moves (
+            source_tablespace      VARCHAR2(30),
+            destination_tablespace VARCHAR2(30))
+        TABLESPACE &&data_tablespace
+        PCTFREE 5 /* There should not be any big updates */';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
-CREATE BITMAP INDEX site_index_stats_n2 ON site_index_stats(STATUS)
-TABLESPACE &&index_tablespace
-STORAGE (INITIAL 16K NEXT 16K PCTINCREASE 0)
-/
-create table site_index_rebuilds(record_id NUMBER,
-				 owner VARCHAR2(30)  NOT NULL,
-				 name VARCHAR2(30) NOT NULL,
-                              	 status VARCHAR2(10) NOT NULL,
-                                 concat CHAR(1) DEFAULT 'N' NOT NULL,
-				 reason VARCHAR2(80),
-				 timestamp date default SYSDATE NOT NULL,
-				 runcount NUMBER DEFAULT 0,
-				 message VARCHAR2(100)
-                         )
-tablespace &&data_tablespace
-storage(initial 64K next 64K pctincrease 0)
-PCTFREE 0
-/
-alter table site_index_rebuilds
-	add constraint site_index_rebuilds_pk
-		primary key (record_id)
-		using index tablespace &&index_tablespace
-			storage(initial 16K next 16K pctincrease 0)
-/
-CREATE INDEX site_index_rebuilds_n1 ON site_index_rebuilds(owner, name)
-TABLESPACE &&index_tablespace
-STORAGE (INITIAL 16K NEXT 16K PCTINCREASE 0)
+BEGIN
+    EXECUTE IMMEDIATE '
+        ALTER TABLE site_index_moves
+            ADD CONSTRAINT site_index_moves_pk
+                PRIMARY KEY (source_tablespace, destination_tablespace)
+                USING INDEX TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
 
-REM Changed from BITMAP INDEX to B-Tree index to avoid ORA-01410 errors
-CREATE INDEX site_index_rebuilds_n2 ON site_index_rebuilds(status)
-TABLESPACE &&index_tablespace
-STORAGE (INITIAL 16K NEXT 16K PCTINCREASE 0)
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE INDEX site_index_stats_n1 ON site_index_stats(owner, name)
+        TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
+/
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE INDEX site_index_stats_n2 ON site_index_stats(STATUS)
+        TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
+/
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLE site_index_rebuilds (
+            record_id  NUMBER,
+            owner      VARCHAR2(30)  NOT NULL,
+            name       VARCHAR2(30)  NOT NULL,
+            status     VARCHAR2(10)  NOT NULL,
+            concat     CHAR(1)       DEFAULT ''N'' NOT NULL,
+            reason     VARCHAR2(80),
+            timestamp  DATE          DEFAULT SYSDATE NOT NULL,
+            runcount   NUMBER        DEFAULT 0,
+            message    VARCHAR2(100))
+        TABLESPACE &&data_tablespace
+        PCTFREE 0';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
+/
+BEGIN
+    EXECUTE IMMEDIATE '
+        ALTER TABLE site_index_rebuilds
+            ADD CONSTRAINT site_index_rebuilds_pk
+                PRIMARY KEY (record_id)
+                USING INDEX TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
+/
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE INDEX site_index_rebuilds_n1 ON site_index_rebuilds(owner, name)
+        TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
+/
+
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE INDEX site_index_rebuilds_n2 ON site_index_rebuilds(status)
+        TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
 
 
-create table index_tool_control(program_id VARCHAR2(10),
-				 status VARCHAR2(10) NOT NULL,
-				 timestamp date DEFAULT SYSDATE NOT NULL,
-				 message VARCHAR2(100))
-tablespace &&data_tablespace
-storage(initial 64K next 64K pctincrease 0)
-PCTFREE 0
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLE index_tool_control (
+            program_id VARCHAR2(10),
+            status     VARCHAR2(10) NOT NULL,
+            timestamp  DATE         DEFAULT SYSDATE NOT NULL,
+            message    VARCHAR2(100))
+        TABLESPACE &&data_tablespace
+        PCTFREE 0';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
-alter table index_tool_control
-	add constraint index_tool_control_pk
-		primary key (program_id)
-		using index tablespace &&index_tablespace
-			storage(initial 16K next 16K pctincrease 0)
+BEGIN
+    EXECUTE IMMEDIATE '
+        ALTER TABLE index_tool_control
+            ADD CONSTRAINT index_tool_control_pk
+                PRIMARY KEY (program_id)
+                USING INDEX TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
 REM Create control records where control is required
 INSERT INTO index_tool_control(program_id, status) values('COLLECT', 'IDLE')
@@ -185,18 +253,29 @@ INSERT INTO index_tool_control(program_id, status) values('COLLECT', 'IDLE')
 INSERT INTO index_tool_control(program_id, status) values('REBUILD', 'IDLE')
 /
 
-create table site_parameters(domain VARCHAR2(30),
-				 name VARCHAR2(30) NOT NULL,
-				 value VARCHAR2(30))
-tablespace &&data_tablespace
-storage(initial 64K next 64K pctincrease 0)
-PCTFREE 0
+BEGIN
+    EXECUTE IMMEDIATE '
+        CREATE TABLE site_parameters (
+            domain VARCHAR2(30),
+            name   VARCHAR2(30) NOT NULL,
+            value  VARCHAR2(30))
+        TABLESPACE &&data_tablespace
+        PCTFREE 0';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
-alter table site_parameters
-	add constraint site_parameters_pk
-		primary key (domain,name)
-		using index tablespace &&index_tablespace
-			storage(initial 16K next 16K pctincrease 0)
+BEGIN
+    EXECUTE IMMEDIATE '
+        ALTER TABLE site_parameters
+            ADD CONSTRAINT site_parameters_pk
+                PRIMARY KEY (domain, name)
+                USING INDEX TABLESPACE &&index_tablespace';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used
+END;
 /
 REM Create entries for parameters where hard coding can be reduced
 INSERT INTO site_parameters(domain, name, value)
@@ -224,6 +303,14 @@ INSERT INTO site_parameters(domain, name, value)
 INSERT INTO site_parameters(domain, name, value)
 	/* Should indexes be moved to another tablespace */
 	VALUES('INDEX_TOOL', 'MOVE_INDEXES', 'TRUE')
+/
+INSERT INTO site_parameters(domain, name, value)
+	/* Wall-clock time (HH24:MI) after which long-running procedures exit gracefully */
+	VALUES('INDEX_TOOL', 'DEFAULT_END_TIME', NULL)
+/
+INSERT INTO site_parameters(domain, name, value)
+	/* Maximum runtime in minutes; converted to an end-time at procedure start */
+	VALUES('INDEX_TOOL', 'DEFAULT_MAX_MINUTES', NULL)
 /
 
 
@@ -337,12 +424,13 @@ PRAGMA EXCEPTION_INIT(index_organised_table, -28650);
            AND a.owner = b.owner
            AND a.name = b.name;
 
-   procedure collect (v_schema VARCHAR2 DEFAULT NULL,
-                   v_table  VARCHAR2 DEFAULT NULL,
-                   v_idx    VARCHAR2 DEFAULT NULL,
-                   v_trace_lvl  NATURAL := 0); /* Collect index stats */
+   procedure collect (v_schema      VARCHAR2 DEFAULT NULL,
+                   v_table       VARCHAR2 DEFAULT NULL,
+                   v_idx         VARCHAR2 DEFAULT NULL,
+                   v_trace_lvl   NATURAL  := 0,
+                   v_end_time    DATE     DEFAULT NULL,
+                   v_max_minutes NUMBER   DEFAULT NULL); /* Collect index stats */
 
-   -- Following three modules not yet implemented
    procedure analyse (v_schema VARCHAR2 DEFAULT NULL,
                    v_table  VARCHAR2 DEFAULT NULL,
                    v_idx    VARCHAR2 DEFAULT NULL,
@@ -390,6 +478,45 @@ END index_tool;
 
 CREATE OR REPLACE PACKAGE BODY index_tool IS
 
+   -- Returns TRUE if tablespace uses Automatic Segment Space Management
+   FUNCTION is_assm (v_tablespace_name VARCHAR2) RETURN BOOLEAN IS
+       v_ssm dba_tablespaces.segment_space_management%TYPE;
+   BEGIN
+       SELECT segment_space_management
+         INTO v_ssm
+         FROM dba_tablespaces
+        WHERE tablespace_name = UPPER(v_tablespace_name);
+       RETURN v_ssm = 'AUTO';
+   EXCEPTION
+       WHEN NO_DATA_FOUND THEN RETURN FALSE;
+   END is_assm;
+
+   -- Resolves effective deadline from parameters or site_parameters
+   FUNCTION effective_end_time (v_end_time DATE, v_max_minutes NUMBER)
+       RETURN DATE IS
+       v_param_end    VARCHAR2(30);
+       v_param_mins   VARCHAR2(30);
+   BEGIN
+       IF v_end_time IS NOT NULL THEN RETURN v_end_time; END IF;
+       IF v_max_minutes IS NOT NULL THEN
+           RETURN SYSDATE + v_max_minutes / 1440;
+       END IF;
+       BEGIN
+           v_param_end := get_site_param_value('INDEX_TOOL','DEFAULT_END_TIME');
+           RETURN TO_DATE(v_param_end, 'HH24:MI');
+       EXCEPTION WHEN OTHERS THEN NULL; END;
+       BEGIN
+           v_param_mins := get_site_param_value('INDEX_TOOL','DEFAULT_MAX_MINUTES');
+           RETURN SYSDATE + TO_NUMBER(v_param_mins) / 1440;
+       EXCEPTION WHEN OTHERS THEN NULL; END;
+       RETURN NULL;
+   END effective_end_time;
+
+   -- Returns TRUE if current time is past the deadline
+   FUNCTION deadline_exceeded (v_deadline DATE) RETURN BOOLEAN IS
+   BEGIN
+       RETURN v_deadline IS NOT NULL AND SYSDATE >= v_deadline;
+   END deadline_exceeded;
 
 				/* Verify index for free space */
    FUNCTION verify (v_record_id NUMBER,
@@ -401,17 +528,25 @@ CREATE OR REPLACE PACKAGE BODY index_tool IS
    FUNCTION index_tool_control_status (v_program_id VARCHAR2,
                                       v_trace_lvl  NATURAL := 0)
 			RETURN VARCHAR2;
-   procedure collect (v_schema VARCHAR2 DEFAULT NULL,
-                   v_table  VARCHAR2 DEFAULT NULL,
-                   v_idx    VARCHAR2 DEFAULT NULL,
-                   v_trace_lvl  NATURAL := 0)
+   procedure collect (v_schema      VARCHAR2 DEFAULT NULL,
+                   v_table       VARCHAR2 DEFAULT NULL,
+                   v_idx         VARCHAR2 DEFAULT NULL,
+                   v_trace_lvl   NATURAL  := 0,
+                   v_end_time    DATE     DEFAULT NULL,
+                   v_max_minutes NUMBER   DEFAULT NULL)
 /*
 Procedure which collects statistics for given or ALL index(s)
 Set serveroutput on and pass trace level value of 1 or more for listing
 of analyzed indexes.
 */
       IS
+      -- 3.5: deadline variable
+      v_deadline DATE;
+      v_index_type dba_indexes.index_type%TYPE;
+      v_table_type dba_indexes.table_type%TYPE;
       BEGIN
+      -- 3.5: resolve effective deadline
+      v_deadline := effective_end_time(v_end_time, v_max_minutes);
 
           IF index_tool_control_status('COLLECT')  
 			IN ('QUIT', 'FAILED') THEN
@@ -447,20 +582,49 @@ of analyzed indexes.
 				         AND b.name  = a.segment_name
 					 AND b.status IN ('SUBMITTED','RETRY'));
 	 	COMMIT WORK;
-	     	v_cur_handle := dbms_sql.open_cursor;
           END IF;
 
-	  FOR each_rec IN cur_collect
+	  FOR cur_collect_rec IN cur_collect
 	  LOOP
+             -- 3.5: check deadline at top of loop
+             IF deadline_exceeded(v_deadline) THEN
+                 update_index_tool_control('COLLECT', 'IDLE', 'Deadline exceeded');
+                 COMMIT;
+                 RETURN;
+             END IF;
+
+             -- 3.3: skip partitioned indexes and IOTs
+             BEGIN
+                 SELECT di.index_type, di.table_type
+                   INTO v_index_type, v_table_type
+                   FROM dba_indexes di
+                  WHERE di.owner      = cur_collect_rec.owner
+                    AND di.index_name = cur_collect_rec.index_name;
+             EXCEPTION
+                 WHEN NO_DATA_FOUND THEN
+                     v_index_type := NULL;
+                     v_table_type := NULL;
+             END;
+
+             IF v_index_type = 'BITMAP'
+                OR v_index_type LIKE '%PARTITION%'
+                OR v_table_type = 'IOT'
+             THEN
+                 UPDATE site_index_stats
+                    SET status  = 'COMPLETED',
+                        message = 'Skipped: partitioned index or IOT'
+                  WHERE record_id = cur_collect_rec.record_id;
+                 CONTINUE;
+             END IF;
+
 	     IF v_trace_lvl > 0 THEN
-		dbms_output.put_line('Validating index '||each_rec.owner||'.'||
-				     each_rec.index_name);
+		dbms_output.put_line('Validating index '||cur_collect_rec.owner||'.'||
+				     cur_collect_rec.index_name);
 	     END IF;
 
 	     /* ONLINE keyword added for 9i+ databases */
-	     v_buff := 'ANALYZE INDEX '||each_rec.owner||'.'||
-		       each_rec.index_name||' VALIDATE STRUCTURE ONLINE';
-
+	     v_buff := 'ANALYZE INDEX '||cur_collect_rec.owner||'.'||
+		       cur_collect_rec.index_name||' VALIDATE STRUCTURE ONLINE';
 
 	     IF v_trace_lvl > 1 THEN
 		dbms_output.put_line(v_buff);
@@ -473,17 +637,23 @@ of analyzed indexes.
 	     END IF;
 
              BEGIN
-		     dbms_sql.parse(v_cur_handle, v_buff, dbms_sql.native);
-		     v_retcode := dbms_sql.execute(v_cur_handle);
+                     -- 3.4: gather optimizer statistics before structural analysis
+                     DBMS_STATS.GATHER_INDEX_STATS(
+                         ownname => cur_collect_rec.owner,
+                         indname => cur_collect_rec.index_name);
+
+                     -- 3.2: use EXECUTE IMMEDIATE instead of DBMS_SQL
+                     EXECUTE IMMEDIATE v_buff;
+
                      DELETE FROM site_index_stats
-			    WHERE record_id=each_rec.record_id;
+			    WHERE record_id=cur_collect_rec.record_id;
 		     INSERT INTO site_index_stats
 			/* This statement would not work if index_stats */
 	      		SELECT index_tool_seq.nextval, /* view changes */
-				each_rec.owner,
+				cur_collect_rec.owner,
 				SYSDATE,
 				'COMPLETED',
-				each_rec.runcount+1,
+				cur_collect_rec.runcount+1,
 				'SUCCESSFUL Collect',
 				a.*
 			from index_stats a;
@@ -493,15 +663,15 @@ of analyzed indexes.
              EXCEPTION
                  WHEN resource_busy THEN /* We should see none of these after ONLINE operations in 9i+ */
 			UPDATE site_index_stats
-			   SET status = DECODE(each_rec.runcount,
+			   SET status = DECODE(cur_collect_rec.runcount,
 						2,'FAILED', 'RETRY'),
 			       timestamp = SYSDATE,
 			       runcount = runcount+1,
-			       message = DECODE(each_rec.runcount,
+			       message = DECODE(cur_collect_rec.runcount,
 						2, 
 					'Three tries failed due to lock',
 					        'Resource busy - retry')
-			 WHERE record_id=each_rec.record_id;
+			 WHERE record_id=cur_collect_rec.record_id;
                  WHEN OTHERS THEN
 			RAISE; /* Pass exception handling to next level */
 	     END; -- End of Anonymous block
@@ -509,35 +679,121 @@ of analyzed indexes.
 
 	  END LOOP; -- Cur_Collect for loop
 
-	  dbms_sql.close_cursor(v_cur_handle);
           update_index_tool_control('COLLECT','IDLE', 
 						'Completed Collection');
-	  COMMIT WORK; /* Close cursor and COMMIT any changes */
+	  COMMIT WORK; /* COMMIT any changes */
 
       EXCEPTION
 	  WHEN instance_shutdown OR session_killed THEN
 	      update_index_tool_control('COLLECT', 'IDLE', 
 			'Collection stopped due to instance shutdown');
-              IF dbms_sql.is_open(v_cur_handle) THEN
-			dbms_sql.close_cursor(v_cur_handle);
-	      END IF;
 	      COMMIT WORK;
           WHEN OTHERS THEN
-              IF dbms_sql.is_open(v_cur_handle) THEN
-			dbms_sql.close_cursor(v_cur_handle);
-	      END IF;
               update_index_tool_control('COLLECT','FAILED', SQLERRM);
               COMMIT WORK;
 	      RAISE; /* Once recorded in control table pass it to Job Queue */
       END collect;
 
-/* This procedure is not yet implemented */
    procedure analyse (v_schema VARCHAR2 DEFAULT NULL,
                    v_table  VARCHAR2 DEFAULT NULL,
                    v_idx    VARCHAR2 DEFAULT NULL,
                    v_trace_lvl  NATURAL := 0) IS
+        v_btree_height_threshold NUMBER :=
+                get_site_param_value('INDEX_TOOL',
+                                        'BTREE_HEIGHT_THRESHOLD');
+        v_pct_delete_threshold NUMBER :=
+                get_site_param_value('INDEX_TOOL',
+                                        'PCT_DELETE_THRESHOLD');
+        v_distinctiveness_threshold NUMBER :=
+                get_site_param_value('INDEX_TOOL',
+                                        'DISTINCTIVENESS_THRESHOLD');
+        v_pct_used_change_threshold NUMBER :=
+                get_site_param_value('INDEX_TOOL',
+                                        'PCT_USED_CHANGE_THRESHOLD');
+        v_age_threshold NUMBER :=
+                get_site_param_value('INDEX_TOOL',
+                                        'AGE_THRESHOLD');
    BEGIN
-	null;
+
+     FOR each_rec IN cur_schedule LOOP
+
+        /* 4.2 B-tree height check */
+        INSERT INTO site_index_rebuilds
+                (record_id, owner, name, status, timestamp, reason)
+          SELECT index_tool_seq.nextval, a.owner, a.name, 'SUBMITTED',
+                 SYSDATE,
+                 'Blevel higher than ' || v_btree_height_threshold
+            FROM site_index_stats a
+           WHERE a.record_id = each_rec.record_id
+             AND a.height > v_btree_height_threshold
+             AND NOT EXISTS (SELECT 'x'
+                               FROM site_index_rebuilds r
+                              WHERE r.owner = a.owner
+                                AND r.name  = a.name
+                                AND r.status NOT IN ('COMPLETED','REJECTED','FAILED'));
+
+        /* 4.3 PCT_DELETE + DISTINCTIVENESS check */
+        INSERT INTO site_index_rebuilds
+                (record_id, owner, name, status, timestamp, reason)
+          SELECT index_tool_seq.nextval, a.owner, a.name, 'SUBMITTED',
+                 SYSDATE,
+                 'PCT deleted more than ' || v_pct_delete_threshold ||
+                 ' and distinctiveness less than ' || v_distinctiveness_threshold
+            FROM site_index_stats a
+           WHERE a.record_id = each_rec.record_id
+             AND a.del_lf_rows /
+                   DECODE(a.lf_rows, 0, 1, a.lf_rows) * 100 > v_pct_delete_threshold
+             AND a.distinct_keys /
+                   DECODE(a.lf_rows, 0, 1, a.lf_rows) * 100 < v_distinctiveness_threshold
+             AND NOT EXISTS (SELECT 'x'
+                               FROM site_index_rebuilds r
+                              WHERE r.owner = a.owner
+                                AND r.name  = a.name
+                                AND r.status NOT IN ('COMPLETED','REJECTED','FAILED'));
+
+        /* 4.4 PCT_USED vs historical average check */
+        INSERT INTO site_index_rebuilds
+                (record_id, owner, name, status, timestamp, reason)
+          SELECT index_tool_seq.nextval, a.owner, a.name, 'SUBMITTED',
+                 SYSDATE,
+                 'PCT Used less than average by ' || v_pct_used_change_threshold || ' %'
+            FROM site_index_stats a
+           WHERE a.record_id = each_rec.record_id
+             AND a.pct_used < (SELECT AVG(d.pct_used) - v_pct_used_change_threshold
+                                 FROM site_index_stats d
+                                WHERE d.owner = a.owner
+                                  AND d.name  = a.name)
+             AND NOT EXISTS (SELECT 'x'
+                               FROM site_index_rebuilds r
+                              WHERE r.owner = a.owner
+                                AND r.name  = a.name
+                                AND r.status NOT IN ('COMPLETED','REJECTED','FAILED'));
+
+        /* 4.5 AGE_THRESHOLD check */
+        INSERT INTO site_index_rebuilds
+                (record_id, owner, name, status, timestamp, reason)
+          SELECT index_tool_seq.nextval, a.owner, a.name, 'SUBMITTED',
+                 SYSDATE,
+                 'Index not rebuilt for more than ' || v_age_threshold || ' days'
+            FROM site_index_stats a
+           WHERE a.record_id = each_rec.record_id
+             AND NOT EXISTS (SELECT 'x'
+                               FROM site_index_rebuilds r
+                              WHERE r.owner     = a.owner
+                                AND r.name      = a.name
+                                AND r.status    = 'COMPLETED'
+                                AND r.timestamp >= SYSDATE - v_age_threshold)
+             AND NOT EXISTS (SELECT 'x'
+                               FROM site_index_rebuilds r
+                              WHERE r.owner = a.owner
+                                AND r.name  = a.name
+                                AND r.status NOT IN ('COMPLETED','REJECTED','FAILED'));
+
+     END LOOP; -- For each_rec in cur_schedule
+
+     /* 4.6 Commit all inserted records */
+     COMMIT WORK;
+
    END analyse;
 
    PROCEDURE purge (v_purge_date    DATE DEFAULT add_months(SYSDATE, -24),
@@ -570,43 +826,155 @@ of analyzed indexes.
 
    END purge;
 
-/* This procedure is not yet implemented */
    PROCEDURE select_tablespaces (v_trace_lvl  NATURAL := 0) IS
+       TYPE t_ts_list IS TABLE OF VARCHAR2(30);
+       v_dest_list t_ts_list;
+       v_src_list  t_ts_list;
    BEGIN
-	
-	NULL; -- To be implemented with care
+       -- 7.1 Collect destination tablespaces (index tablespaces)
+       SELECT tablespace_name
+         BULK COLLECT INTO v_dest_list
+         FROM dba_tablespaces
+        WHERE tablespace_name LIKE '%INDEX%'
+           OR tablespace_name LIKE '%IDX%'
+           OR tablespace_name LIKE '%INDX%'
+           OR tablespace_name LIKE '%X';
 
-	/* Select source and destination tablespaces based on
-	         tablespace usage and tablespace name */
-	/* Some example logic to use here would ...
-	 1. Select source and destination tablespaces based on segment types
-	      E.g. High table segments mean source tablespace and
-		   High index segments mean target tablespace
-	 2. Select source and destination tablespaces based on names
-	      E.g. %INDEX%, %IDX%, %INDX%, and %X are target tablespaces
-	      E.g. %DATA% and %D are source tablespaces
-       */
+       -- 7.2 Collect source tablespaces (data tablespaces)
+       SELECT tablespace_name
+         BULK COLLECT INTO v_src_list
+         FROM dba_tablespaces
+        WHERE tablespace_name LIKE '%DATA%'
+           OR tablespace_name LIKE '%D';
+
+       -- 7.4 Warn and return if either list is empty
+       IF v_src_list.COUNT = 0 OR v_dest_list.COUNT = 0 THEN
+           DBMS_OUTPUT.PUT_LINE(
+               'WARNING: select_tablespaces found no matching tablespaces. '
+               || 'Source count=' || v_src_list.COUNT
+               || ', Destination count=' || v_dest_list.COUNT
+               || '. site_index_moves not updated.');
+           RETURN;
+       END IF;
+
+       IF v_trace_lvl > 0 THEN
+           DBMS_OUTPUT.PUT_LINE('select_tablespaces: '
+               || v_src_list.COUNT  || ' source(s), '
+               || v_dest_list.COUNT || ' destination(s) found.');
+       END IF;
+
+       -- 7.3 Insert all source x destination pairs not already present
+       INSERT INTO site_index_moves (source_tablespace, destination_tablespace)
+         SELECT src.column_value, dst.column_value
+           FROM TABLE(v_src_list)  src,
+                TABLE(v_dest_list) dst
+          WHERE NOT EXISTS (
+                    SELECT 'x'
+                      FROM site_index_moves m
+                     WHERE m.source_tablespace      = src.column_value
+                       AND m.destination_tablespace = dst.column_value);
+
+       -- 7.5 Commit inserted rows
+       COMMIT WORK;
 
    END select_tablespaces;
 
-/* This procedure is not yet implemented */
    procedure confirm (v_schema VARCHAR2 DEFAULT NULL,
                     v_table  VARCHAR2 DEFAULT NULL,
                    v_idx    VARCHAR2 DEFAULT NULL,
                    v_trace_lvl  NATURAL := 0) IS
-    BEGIN
-        null;
-    END confirm;
+   BEGIN
+       /* 6.1 Display all SUBMITTED records filtered by v_schema / v_idx */
+       FOR each_rec IN (
+           SELECT record_id, owner, name, reason, timestamp
+             FROM site_index_rebuilds
+            WHERE status = 'SUBMITTED'
+              AND (v_schema IS NULL OR owner = v_schema)
+              AND (v_idx    IS NULL OR name  = v_idx)
+            ORDER BY record_id
+       ) LOOP
+           DBMS_OUTPUT.PUT_LINE(
+               'ID: '     || each_rec.record_id  ||
+               '  Owner: '|| each_rec.owner       ||
+               '  Index: '|| each_rec.name        ||
+               '  Reason: '|| each_rec.reason     ||
+               '  Time: ' || TO_CHAR(each_rec.timestamp, 'YYYY-MM-DD HH24:MI:SS'));
+       END LOOP;
 
-/* This procedure is not yet implemented */
+       /* 6.2 Bulk-approve when both v_schema and v_idx are supplied */
+       IF v_schema IS NOT NULL AND v_idx IS NOT NULL THEN
+           UPDATE site_index_rebuilds
+              SET status    = 'VERIFIED',
+                  timestamp = SYSDATE
+            WHERE status = 'SUBMITTED'
+              AND owner   = v_schema
+              AND name    = v_idx;
+       END IF;
+
+       /* 6.3 Commit all changes */
+       COMMIT WORK;
+   END confirm;
+
    procedure report (v_schema VARCHAR2 DEFAULT NULL,
                    v_table  VARCHAR2 DEFAULT NULL,
                    v_idx    VARCHAR2 DEFAULT NULL,
                    v_trace_lvl  NATURAL := 0) IS
+       v_found   BOOLEAN := FALSE;
+       v_status  site_index_stats.status%TYPE;
    BEGIN
-        FOR each_rec IN cur_rpt LOOP
-		NULL;
-	END LOOP;
+       IF v_trace_lvl > 0 THEN
+           DBMS_OUTPUT.PUT_LINE(
+               RPAD('OWNER',    30) ||
+               RPAD('INDEX_NAME',30) ||
+               LPAD('HGT',       5) ||
+               LPAD('%DEL',      7) ||
+               LPAD('%USED',     7) ||
+               LPAD('AVG%USED', 10) ||
+               '  STATUS');
+       END IF;
+
+       FOR each_rec IN cur_rpt LOOP
+           /* 5.1 Post-fetch schema / index name filters */
+           IF v_schema IS NOT NULL AND each_rec.owner != v_schema THEN
+               CONTINUE;
+           END IF;
+           IF v_idx IS NOT NULL AND each_rec.name != v_idx THEN
+               CONTINUE;
+           END IF;
+
+           v_found := TRUE;
+
+           /* 5.2 Emit row when tracing is enabled */
+           IF v_trace_lvl > 0 THEN
+               /* Fetch status for the latest record of this index */
+               BEGIN
+                   SELECT status
+                     INTO v_status
+                     FROM site_index_stats
+                    WHERE record_id = (SELECT MAX(record_id)
+                                         FROM site_index_stats
+                                        WHERE owner = each_rec.owner
+                                          AND name  = each_rec.name);
+               EXCEPTION
+                   WHEN NO_DATA_FOUND THEN v_status := 'UNKNOWN';
+               END;
+
+               DBMS_OUTPUT.PUT_LINE(
+                   RPAD(each_rec.owner, 30) ||
+                   RPAD(each_rec.name,  30) ||
+                   LPAD(each_rec.height, 5) ||
+                   LPAD(ROUND(each_rec."%Deletes - Current", 1), 7) ||
+                   LPAD(each_rec."%Used - Current", 7) ||
+                   LPAD(ROUND(each_rec."%Used - Average", 1), 10) ||
+                   '  ' || v_status);
+           END IF;
+       END LOOP;
+
+       /* 5.3 No rows found */
+       IF NOT v_found THEN
+           DBMS_OUTPUT.PUT_LINE('No index statistics data available.');
+           RETURN;
+       END IF;
    END report;
 
 /* Function to retrieve status from index_tool_control table */
@@ -657,6 +1025,16 @@ of analyzed indexes.
 		    v_concat IN OUT CHAR,
                     v_trace_lvl  NATURAL := 0) RETURN BOOLEAN IS
    BEGIN
+       IF is_assm(v_tablespace_name) THEN
+           v_concat := 'N';
+           UPDATE site_index_rebuilds
+              SET status    = 'VERIFIED',
+                  timestamp = SYSDATE,
+                  message   = 'ASSM tablespace: space check skipped'
+            WHERE record_id = v_record_id;
+           RETURN TRUE;
+       END IF;
+
 	UPDATE site_index_rebuilds a
            SET a.concat='Y',
 		 /* If not enough space for concat set it to false */
